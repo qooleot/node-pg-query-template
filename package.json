@@ -1,0 +1,28 @@
+{
+  "author": {
+    "name": "Taras Mitran"
+  },
+  "dependencies": {},
+  "description": "Query Templates for Postgres in Node.js",
+  "directories": {},
+  "keywords": [
+    "postgres"
+  ],
+  "license": "MIT",
+  "main": "index.js",
+  "maintainers": [
+    {
+      "name": "qooleot",
+      "email": "tbmitran@gmail.com"
+    }
+  ],
+  "name": "pg-query-template",
+  "optionalDependencies": {},
+  "readme": "# pg-query-template\n\n## license\n\nMIT\n",
+  "readmeFilename": "README.md",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/qooleot/node-pg-query-template"
+  },
+  "version": "0.0.1"
+}
