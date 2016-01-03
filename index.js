@@ -31,5 +31,21 @@ module.exports = function(pg) {
 
     return queryWrapper;
   };
+
+  exports.sqlTemplate = pg.Client.prototype.sqlTmpl = function(pieces) {
+    var result = '';
+    var vals = [];
+    var substitutions = [].slice.call(arguments, 1);
+    for (var i = 0; i < substitutions.length; ++i) {
+      result += pieces[i] + '$' + (i + 1);
+      vals.push(substitutions[i]);
+    }
+
+    result += pieces[substitutions.length];
+
+    return {query: result, values: vals};
+  };
+
+  return exports;
 }
 
