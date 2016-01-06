@@ -18,14 +18,14 @@ module.exports = function(pg) {
     }
 
     var me = this;
-    var queryWrapper = new Promise(function(resolve) {
+    var queryWrapper = new Promise(function(resolve, reject) {
       pg.Client.prototype.queryAsync.call(me, obj.query, obj.values)
         .then(function(queryResult) {
           queryResult = _.pick(queryResult, ['rowCount', 'rows']);
           resolve(queryResult);
         })
         .catch(function(e) {
-          throw e;
+          reject(e);
         });
     });
 
