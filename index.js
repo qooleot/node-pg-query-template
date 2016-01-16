@@ -1,5 +1,50 @@
 
-module.exports = function(pg) {
+module.exports = function(pg, app) {
+
+  function override(object, methodName, callback) {
+    object[methodName] = callback(object[methodName])
+  } 
+
+  // attaching method to pg.Client so all the APIs that use app.pgClient.queryAsync will use connection pooling
+  pg.Client.prototype.queryAsync = Promise.promisify(function(query, bindVars, queryCB) {
+
+    // if no bind vars
+    if (queryCB == undefined) {
+      queryCB = bindVars;
+      bindVars = [];
+    }
+
+    pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
+      pgClient.query(query, bindVars, function(err, queryRes) {
+        connectFinishFn();
+        queryCB(err, queryRes);
+      });
+    });
+  });
+
+  // grab client from pool, then create begin transaction
+  app.pgClient.transactionStart = Promise.promisify(function(cb) {
+    pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
+      pgClient.returnClientToPool = connectFinishFn;
+      pgClient.query('BEGIN', function(err, beginResult) {
+        cb(connectErr, pgClient);
+      });
+    });
+  });
+ 
+  // commit + return client to connection pool
+  pg.Client.prototype.commit = Promise.promisify(function(cb) {
+    pg.Client.query('COMMIT', function(err, commitCB) {
+      pg.Client.returnClientToPool();
+    });
+  });
+
+  // rollback + return client to connection pool
+  pg.Client.prototype.rollback = Promise.promisify(function(cb) {
+    pg.Client.query('ROLLBACK', function(err, commitCB) {
+      pg.Client.returnClientToPool();
+    });
+  });
 
   pg.Client.prototype.queryTmpl = function(obj, substVals) {
 
