@@ -23,7 +23,7 @@ module.exports = function(pg, app) {
   });
 
   // grab client from pool, then create begin transaction
-  app.pgClient.transactionStart = Promise.promisify(function(cb) {
+  pg.Client.prototype.transactionStart = Promise.promisify(function(cb) {
     pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
       pgClient.returnClientToPool = connectFinishFn;
       pgClient.query('BEGIN', function(err, beginResult) {
@@ -34,15 +34,19 @@ module.exports = function(pg, app) {
  
   // commit + return client to connection pool
   pg.Client.prototype.commit = Promise.promisify(function(cb) {
-    pg.Client.query('COMMIT', function(err, commitCB) {
-      pg.Client.returnClientToPool();
+    var client = this;
+    client.query('COMMIT', function(err, commitResult) {
+      client.returnClientToPool();
+      cb(err, commitResult); 
     });
   });
 
   // rollback + return client to connection pool
   pg.Client.prototype.rollback = Promise.promisify(function(cb) {
-    pg.Client.query('ROLLBACK', function(err, commitCB) {
-      pg.Client.returnClientToPool();
+    var client = this;
+    client.query('ROLLBACK', function(err, rollbackResult) {
+      client.returnClientToPool();
+      cb(err, rollbackResult); 
     });
   });
 
