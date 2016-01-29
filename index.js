@@ -8,24 +8,31 @@ module.exports = function(pg, app) {
   // attaching method to pg.Client so all the APIs that use app.pgClient.queryAsync will use connection pooling
   pg.Client.prototype.queryAsync = Promise.promisify(function(query, bindVars, queryCB) {
 
+    var client = this;
+
     // if no bind vars
     if (queryCB == undefined) {
       queryCB = bindVars;
       bindVars = [];
     }
 
-    pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
-      pgClient.query(query, bindVars, function(err, queryRes) {
-        connectFinishFn();
-        queryCB(err, queryRes);
+    if (this.inTransaction) {
+     client.query(query, bindVars, queryCB);
+    } else {  
+      pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
+        pgClient.query(query, bindVars, function(err, queryRes) {
+          connectFinishFn();
+          queryCB(err, queryRes);
+        });
       });
-    });
+    }   
   });
 
   // grab client from pool, then create begin transaction
   pg.Client.prototype.transactionStart = Promise.promisify(function(cb) {
     pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
       pgClient.returnClientToPool = connectFinishFn;
+      pgClient.inTransaction = true;
       pgClient.query('BEGIN', function(err, beginResult) {
         cb(connectErr, pgClient);
       });
@@ -35,6 +42,7 @@ module.exports = function(pg, app) {
   // commit + return client to connection pool
   pg.Client.prototype.commit = Promise.promisify(function(cb) {
     var client = this;
+    client.inTransaction = false;
     client.query('COMMIT', function(err, commitResult) {
       client.returnClientToPool();
       cb(err, commitResult); 
@@ -44,6 +52,7 @@ module.exports = function(pg, app) {
   // rollback + return client to connection pool
   pg.Client.prototype.rollback = Promise.promisify(function(cb) {
     var client = this;
+    client.inTransaction = false;
     client.query('ROLLBACK', function(err, rollbackResult) {
       client.returnClientToPool();
       cb(err, rollbackResult); 
@@ -51,7 +60,7 @@ module.exports = function(pg, app) {
   });
 
   pg.Client.prototype.queryTmpl = function(obj, substVals) {
-
+  
     /* lodash template handling
      *   since template strings do not allow templates-within-templates
      *   and a shortcut way to just inject blocks of sql that is trusted (i.e. not input from ajax call)
