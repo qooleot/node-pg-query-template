@@ -3,7 +3,11 @@ module.exports = function(pg, app) {
 
   function override(object, methodName, callback) {
     object[methodName] = callback(object[methodName])
-  } 
+  }
+
+  pg.on('error', function(error) {
+    console.log('pg error', error);
+  })
 
   // attaching method to pg.Client so all the APIs that use app.pgClient.queryAsync will use connection pooling
   pg.Client.prototype.queryAsync = Promise.promisify(function(query, bindVars, queryCB) {
@@ -83,6 +87,7 @@ module.exports = function(pg, app) {
           resolve(queryResult);
         })
         .catch(function(e) {
+          console.log('query error in promise', e)
           reject(e);
         });
     });
