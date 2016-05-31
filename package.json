@@ -2,7 +2,10 @@
   "author": {
     "name": "Taras Mitran"
   },
-  "dependencies": {},
+  "dependencies": {
+    "lodash": "x",
+    "bluebird": "x"
+  },
   "description": "Query Templates for Postgres in Node.js",
   "directories": {},
   "keywords": [

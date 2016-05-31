@@ -1,3 +1,7 @@
+"use strict";
+
+const Promise = require('bluebird');
+const _ = require('lodash');
 
 module.exports = function(pg, app) {
 
