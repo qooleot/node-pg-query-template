@@ -2,6 +2,7 @@
 
 const Promise = require('bluebird');
 const _ = require('lodash');
+const Cursor = require('pg-cursor');
 
 module.exports = function(pg, app) {
 
@@ -67,8 +68,7 @@ module.exports = function(pg, app) {
     });
   });
 
-  pg.Client.prototype.queryTmpl = function(obj, substVals) {
-  
+  const convertHandlebarsTemplateToQuery = function(obj, substVals) {
     /* lodash template handling
      *   since template strings do not allow templates-within-templates
      *   and a shortcut way to just inject blocks of sql that is trusted (i.e. not input from ajax call)
@@ -81,7 +81,12 @@ module.exports = function(pg, app) {
         obj.query = compiled(substVals);
         numSubstTries++;
       }
-    }
+    }  
+  }
+
+  pg.Client.prototype.queryTmpl = function(obj, substVals) {
+  
+    convertHandlebarsTemplateToQuery(obj, substVals);
 
     var me = this;
     var queryWrapper = new Promise(function(resolve, reject) {
@@ -98,6 +103,49 @@ module.exports = function(pg, app) {
 
     return queryWrapper;
   };
+
+  const cursorQuery = function(query, bindVars, cursorCB) {
+ 
+    pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
+      let cursor = pgClient.query(new Cursor(query, bindVars));
+      cursor.endConnection = connectFinishFn;
+
+      cursor.readAsync = Promise.promisify(function(numRows, readWrapperCB) {
+        
+        cursor.read(numRows, function(err, rows) {
+          if (err) {
+            connectFinishFn(err);
+            return readWrapperCB(err);
+          }
+ 
+          if (!rows.length) {
+            connectFinishFn();
+            return readWrapperCB(null, rows);
+          }
+
+          readWrapperCB(null, rows); 
+        });
+      }); 
+     
+      cursorCB(connectErr, cursor);
+    });
+
+  };
+
+  pg.Client.prototype.cursorAsync = Promise.promisify(cursorQuery);
+
+  pg.Client.prototype.cursorTmpl = Promise.promisify(function(obj, substVals, cursorCB) {
+
+    // if no bind vars
+    if (cursorCB == undefined) {
+      cursorCB = substVals;
+      substVals = [];
+    }
+
+    convertHandlebarsTemplateToQuery(obj, substVals);
+
+    cursorQuery(obj.query, obj.values, cursorCB);
+  });
 
   exports.sqlTemplate = pg.Client.prototype.sqlTmpl = function(pieces) {
     var result = '';

@@ -4,7 +4,9 @@
   },
   "dependencies": {
     "lodash": "x",
-    "bluebird": "x"
+    "bluebird": "x",
+    "pg": "x",
+    "pg-cursor": "x"
   },
   "description": "Query Templates for Postgres in Node.js",
   "directories": {},
@@ -27,5 +29,5 @@
     "type": "git",
     "url": "git://github.com/qooleot/node-pg-query-template"
   },
-  "version": "0.1.4"
+  "version": "0.2.4"
 }
