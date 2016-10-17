@@ -10,6 +10,25 @@ module.exports = function(pg, app) {
     object[methodName] = callback(object[methodName])
   }
 
+  const url = require('url');
+
+  const connParams = url.parse(app.config.pg.business.pg_conn_string);
+  const auth = connParams.auth.split(':');
+
+  const config = {
+    user: auth[0],
+    password: auth[1],
+    host: connParams.hostname,
+    port: connParams.port,
+    database: app.config.pg.business.pg_conn_string.split('/')[3]
+  };
+
+  const pool = app.pgPool = new pg.Pool(config);
+
+  pool.on('error', function(error) {
+    console.log('pg error', error);
+  })
+
   pg.on('error', function(error) {
     console.log('pg error', error);
   })
@@ -28,7 +47,7 @@ module.exports = function(pg, app) {
     if (this.inTransaction) {
      client.query(query, bindVars, queryCB);
     } else {  
-      pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
+      pool.connect(function(connectErr, pgClient, connectFinishFn) {
         pgClient.query(query, bindVars, function(err, queryRes) {
           connectFinishFn();
           queryCB(err, queryRes);
@@ -39,7 +58,7 @@ module.exports = function(pg, app) {
 
   // grab client from pool, then create begin transaction
   pg.Client.prototype.transactionStart = Promise.promisify(function(cb) {
-    pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
+    pool.connect(function(connectErr, pgClient, connectFinishFn) {
       pgClient.returnClientToPool = connectFinishFn;
       pgClient.inTransaction = true;
       pgClient.query('BEGIN', function(err, beginResult) {
@@ -106,7 +125,7 @@ module.exports = function(pg, app) {
 
   const cursorQuery = function(query, bindVars, cursorCB) {
  
-    pg.connect(app.config.pg.business.pg_conn_string, function(connectErr, pgClient, connectFinishFn) {
+    pool.connect(function(connectErr, pgClient, connectFinishFn) {
       let cursor = pgClient.query(new Cursor(query, bindVars));
       cursor.endConnection = connectFinishFn;
 
