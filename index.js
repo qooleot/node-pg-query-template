@@ -3,25 +3,15 @@
 const Promise = require('bluebird');
 const _ = require('lodash');
 const Cursor = require('pg-cursor');
+const parseConnectionString = require('lib/parseConnectionString');
 
 module.exports = function(pg, app) {
 
   function override(object, methodName, callback) {
     object[methodName] = callback(object[methodName])
   }
-
-  const url = require('url');
-
-  const connParams = url.parse(app.config.pg.business.pg_conn_string);
-  const auth = connParams.auth.split(':');
-
-  const config = {
-    user: auth[0],
-    password: auth[1],
-    host: connParams.hostname,
-    port: connParams.port,
-    database: app.config.pg.business.pg_conn_string.split('/')[3]
-  };
+  
+  const config = parseConnectionString(app.config.pg.business.pg_conn_string);
 
   const pool = app.pgPool = new pg.Pool(config);
 
