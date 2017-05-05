@@ -29,5 +29,12 @@
     "type": "git",
     "url": "git://github.com/qooleot/node-pg-query-template"
   },
-  "version": "0.2.5"
+  "scripts": {
+    "test": "mocha --recursive test/"
+  },
+  "version": "0.3.0",
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "mocha": "^3.3.0"
+  }
 }
