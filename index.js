@@ -3,7 +3,7 @@
 const Promise = require('bluebird');
 const _ = require('lodash');
 const Cursor = require('pg-cursor');
-const parseConnectionString = require('lib/parseConnectionString');
+const parseConnectionString = require('./lib/parseConnectionString');
 
 module.exports = function(pg, app) {
 
@@ -113,32 +113,55 @@ module.exports = function(pg, app) {
     return queryWrapper;
   };
 
-  const cursorQuery = function(query, bindVars, cursorCB) {
+  const cursorQuery = function(query, bindVars, cursorCreateCB) {
  
     pool.connect(function(connectErr, pgClient, connectFinishFn) {
-      let cursor = pgClient.query(new Cursor(query, bindVars));
-      cursor.endConnection = connectFinishFn;
+      pgClient.query('BEGIN', function(transactionBeginErr) {
+        if(transactionBeginErr) {
+          console.log('query error begining transaction', transactionBeginErr);
+          return connectFinishFn(err);
+        }
 
-      cursor.readAsync = Promise.promisify(function(numRows, readWrapperCB) {
+        // cursors are meant to stream bulk data so no timeout
+        pgClient.query('SET statement_timeout = 0', function(timeoutErr, setTimeoutRes) {
+          if(timeoutErr) {
+            console.log('error setting the postgres statement_timeout setting', timeoutErr);
+            pgClient.query('ROLLBACK', function(rollbackErr, rollbackResult) {
+              console.log('rolling back transaction', rollbackErr);
+              return connectFinishFn(err);
+            });  
+          }
+
+          let cursor = pgClient.query(new Cursor(query, bindVars));
+          cursor.endConnection = connectFinishFn;
+
+          cursor.readAsync = Promise.promisify(function(numRows, readWrapperCB) {
         
-        cursor.read(numRows, function(err, rows) {
-          if (err) {
-            connectFinishFn(err);
-            return readWrapperCB(err);
-          }
- 
-          if (!rows.length) {
-            connectFinishFn();
-            return readWrapperCB(null, rows);
-          }
-
-          readWrapperCB(null, rows); 
-        });
-      }); 
+            cursor.read(numRows, function(cursorReadErr, rows) {
+              if (cursorReadErr) {
+                console.log('cursor read error', cursorReadErr);
+                pgClient.query('ROLLBACK', function(rollbackErr, rollbackResult) {
+                  connectFinishFn(err);
+                  return readWrapperCB(err);
+                });
+              } else if (!rows.length) {
+                pgClient.query('COMMIT', function(commitErr) {
+                  if (commitErr) {
+                    console.log('error committing cursor transaction', commitErr);
+                  }  
+                  connectFinishFn();
+                });
+                return readWrapperCB(null, rows);
+              } else {
+                readWrapperCB(null, rows); 
+              }
+            });
+          }); 
      
-      cursorCB(connectErr, cursor);
+          cursorCreateCB(connectErr, cursor);
+        });
+      });
     });
-
   };
 
   pg.Client.prototype.cursorAsync = Promise.promisify(cursorQuery);
