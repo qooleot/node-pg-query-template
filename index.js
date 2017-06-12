@@ -141,8 +141,9 @@ module.exports = function(pg, app) {
               if (cursorReadErr) {
                 console.log('cursor read error', cursorReadErr);
                 pgClient.query('ROLLBACK', function(rollbackErr, rollbackResult) {
-                  connectFinishFn(err);
-                  return readWrapperCB(err);
+                  console.log('rollback after cursor read error done');
+                  connectFinishFn(rollbackErr);
+                  return readWrapperCB(rollbackErr);
                 });
               } else if (!rows.length) {
                 pgClient.query('COMMIT', function(commitErr) {
