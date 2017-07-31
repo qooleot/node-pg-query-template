@@ -5,28 +5,28 @@ const _ = require('lodash');
 const Cursor = require('pg-cursor');
 const parseConnectionString = require('./lib/parseConnectionString');
 
-module.exports = function(pg, app) {
-
-  function override(object, methodName, callback) {
-    object[methodName] = callback(object[methodName])
-  }
+/*
+  See readme for an overview
+ */
+module.exports = function(pg, connString) {
   
-  const config = parseConnectionString(app.config.pg.business.pg_conn_string);
+  const config = exports.pgConfig = parseConnectionString(connString);
 
-  const pool = app.pgPool = new pg.Pool(config);
+  const pool = exports.pgPool = new pg.Pool(config);
 
+  /*
+    global logging -------------------------------
+   */
   pool.on('error', function(error) {
     console.log('pg error', error);
-  })
+  });
 
-  pg.on('error', function(error) {
-    console.log('pg error', error);
-  })
+  // ---------------------------------------------
 
-  // attaching method to pg.Client so all the APIs that use app.pgClient.queryAsync will use connection pooling
+  // attaching method to pg.Client so all the APIs that use a singleton pgClient.queryAsync will use connection pooling
   pg.Client.prototype.queryAsync = Promise.promisify(function(query, bindVars, queryCB) {
 
-    var client = this;
+    let client = this;
 
     // if no bind vars
     if (queryCB == undefined) {
@@ -59,7 +59,7 @@ module.exports = function(pg, app) {
  
   // commit + return client to connection pool
   pg.Client.prototype.commit = Promise.promisify(function(cb) {
-    var client = this;
+    let client = this;
     client.inTransaction = false;
     client.query('COMMIT', function(err, commitResult) {
       client.returnClientToPool();
@@ -69,7 +69,7 @@ module.exports = function(pg, app) {
 
   // rollback + return client to connection pool
   pg.Client.prototype.rollback = Promise.promisify(function(cb) {
-    var client = this;
+    let client = this;
     client.inTransaction = false;
     client.query('ROLLBACK', function(err, rollbackResult) {
       client.returnClientToPool();
@@ -77,41 +77,49 @@ module.exports = function(pg, app) {
     });
   });
 
+  /* lodash template handling
+   *   since template strings do not allow templates-within-templates
+   *   and a shortcut way to just inject blocks of sql that is trusted (i.e. not input from ajax call)
+   */
   const convertHandlebarsTemplateToQuery = function(obj, substVals) {
-    /* lodash template handling
-     *   since template strings do not allow templates-within-templates
-     *   and a shortcut way to just inject blocks of sql that is trusted (i.e. not input from ajax call)
-     */
     if (substVals) {
-      var numSubstTries = 0;
+      let numSubstTries = 0;
       while (numSubstTries < 5 && obj.query.match(/{{/)) {
         _.templateSettings.interpolate = /{{([\s\S]+?)}}/g;
-        var compiled = _.template(obj.query);
+        let compiled = _.template(obj.query);
         obj.query = compiled(substVals);
         numSubstTries++;
       }
     }  
-  }
+  };
 
+  // adds the main method to the pg client class for querying data in this simplified bind variables design
   pg.Client.prototype.queryTmpl = function(obj, substVals) {
   
     convertHandlebarsTemplateToQuery(obj, substVals);
 
-    var me = this;
-    var queryWrapper = new Promise(function(resolve, reject) {
+    let me = this;
+    let queryWrapper = new Promise(function(resolve, reject) {
       pg.Client.prototype.queryAsync.call(me, obj.query, obj.values)
         .then(function(queryResult) {
           queryResult = _.pick(queryResult, ['rowCount', 'rows']);
           resolve(queryResult);
         })
         .catch(function(e) {
-          console.log('query error in promise', e)
+          console.log('query error in promise', e);
           reject(e);
         });
     });
 
     return queryWrapper;
   };
+
+  /*
+    Cursors are a postgresql features that allows nodejs to read data in a stream
+
+    The bulk of the logic here is to create a transaction
+      and remove statement timeout settings for cursors since they meant to be are read-only long running
+   */
 
   const cursorQuery = function(query, bindVars, cursorCreateCB) {
  
@@ -167,6 +175,7 @@ module.exports = function(pg, app) {
 
   pg.Client.prototype.cursorAsync = Promise.promisify(cursorQuery);
 
+  // parallel wrapper of queryTmpl but for cursors
   pg.Client.prototype.cursorTmpl = Promise.promisify(function(obj, substVals, cursorCB) {
 
     // if no bind vars
@@ -180,11 +189,13 @@ module.exports = function(pg, app) {
     cursorQuery(obj.query, obj.values, cursorCB);
   });
 
+  // convert @param pieces (arguments to sqlTemplate) to bind variable strings
+  //   such as $1 and ['foo']
   exports.sqlTemplate = pg.Client.prototype.sqlTmpl = function(pieces) {
-    var result = '';
-    var vals = [];
-    var substitutions = [].slice.call(arguments, 1);
-    for (var i = 0; i < substitutions.length; ++i) {
+    let result = '';
+    let vals = [];
+    let substitutions = [].slice.call(arguments, 1);
+    for (let i = 0; i < substitutions.length; ++i) {
       result += pieces[i] + '$' + (i + 1);
       vals.push(substitutions[i]);
     }
@@ -195,5 +206,5 @@ module.exports = function(pg, app) {
   };
 
   return exports;
-}
+};
 

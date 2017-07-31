@@ -3,10 +3,10 @@
     "name": "Taras Mitran"
   },
   "dependencies": {
-    "lodash": "x",
-    "bluebird": "x",
-    "pg": "x",
-    "pg-cursor": "x"
+    "lodash": "4.17.4",
+    "bluebird": "^3.5.0",
+    "pg": "^7.0.2",
+    "pg-cursor": "^1.2.0"
   },
   "description": "Query Templates for Postgres in Node.js",
   "directories": {},
@@ -32,7 +32,7 @@
   "scripts": {
     "test": "mocha --recursive test/"
   },
-  "version": "0.4.1",
+  "version": "0.5.0",
   "devDependencies": {
     "chai": "^3.5.0",
     "mocha": "^3.3.0"

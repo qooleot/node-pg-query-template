@@ -1,3 +1,7 @@
+# VIM
+*.swp
+*.swo
+
 # Logs
 logs
 *.log
@@ -25,3 +29,16 @@ build/Release
 # Dependency directory
 # https://www.npmjs.org/doc/misc/npm-faq.html#should-i-check-my-node_modules-folder-into-git
 node_modules
+
+#IDEs
+*~
+*/__pycache__/*
+*/migrations/*
+*.pyc
+*.idea*
+*.idea/*
+.idea/*
+.project
+**/build/
+*.iml
+
