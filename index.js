@@ -4,6 +4,7 @@ const Promise = require('bluebird');
 const _ = require('lodash');
 const Cursor = require('pg-cursor');
 const parseConnectionString = require('./lib/parseConnectionString');
+const listenNotifyClient = require('./lib/listenNotifyClient');
 
 /*
   See readme for an overview
@@ -38,10 +39,15 @@ module.exports = function(pg, connString) {
      client.query(query, bindVars, queryCB);
     } else {  
       pool.connect(function(connectErr, pgClient, connectFinishFn) {
-        pgClient.query(query, bindVars, function(err, queryRes) {
-          connectFinishFn();
-          queryCB(err, queryRes);
-        });
+        if (connectErr) {
+          console.log('database connection error: ', connectErr);
+          connectFinishFn(connectErr);
+        } else {
+          pgClient.query(query, bindVars, function(err, queryRes) {
+            connectFinishFn();
+            queryCB(err, queryRes);
+          });
+        }  
       });
     }   
   });
@@ -204,6 +210,12 @@ module.exports = function(pg, connString) {
 
     return {query: result, values: vals};
   };
+
+  // wrapper for lib to share the existing connection string for general postgres pool
+  pg.Client.prototype.listenNotify = function(channelName, callback) {
+    listenNotifyClient(connString, channelName, callback);
+    return {success: true}
+  } 
 
   return exports;
 };
