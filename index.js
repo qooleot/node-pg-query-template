@@ -19,7 +19,11 @@ module.exports = function(pg, connString) {
     global logging -------------------------------
    */
   pool.on('error', function(error) {
-    console.log('pg error', error);
+    try {
+      console.log('pg error', error);
+    } catch(e) {
+      console.log('Could not log a postgres error due to circular json');
+    }
   });
 
   // ---------------------------------------------
