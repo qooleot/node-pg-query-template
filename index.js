@@ -18,11 +18,15 @@ module.exports = function(pg, connString) {
   /*
     global logging -------------------------------
    */
-  pool.on('error', function(error) {
+  pool.on('error', function(error, client) {
     try {
-      console.log('pg error', error);
+      let lastQuery;
+      if (client) {
+        lastQuery = client.lastQuery;
+      }
+      console.error('pg-pool error after last query: ', lastQuery, error );
     } catch(e) {
-      console.log('Could not log a postgres error due to circular json');
+      console.error('Could not log a postgres error due to circular json');
     }
   });
 
@@ -40,13 +44,15 @@ module.exports = function(pg, connString) {
     }
 
     if (this.inTransaction) {
+     client.lastQuery = { query, bindVars }; 
      client.query(query, bindVars, queryCB);
-    } else {  
+    } else {
       pool.connect(function(connectErr, pgClient, connectFinishFn) {
         if (connectErr) {
-          console.log('database connection error: ', connectErr);
+          console.error('database connection error: ', connectErr);
           connectFinishFn(connectErr);
         } else {
+          pgClient.lastQuery = { query, bindVars }; 
           pgClient.query(query, bindVars, function(err, queryRes) {
             connectFinishFn();
             queryCB(err, queryRes);
@@ -116,7 +122,7 @@ module.exports = function(pg, connString) {
           resolve(queryResult);
         })
         .catch(function(e) {
-          console.log('query error in promise', e);
+          console.error('query error in promise', e);
           reject(e);
         });
     });
@@ -136,16 +142,16 @@ module.exports = function(pg, connString) {
     pool.connect(function(connectErr, pgClient, connectFinishFn) {
       pgClient.query('BEGIN', function(transactionBeginErr) {
         if(transactionBeginErr) {
-          console.log('query error begining transaction', transactionBeginErr);
+          console.error('query error begining transaction', transactionBeginErr);
           return connectFinishFn(err);
         }
 
         // cursors are meant to stream bulk data so no timeout
         pgClient.query('SET statement_timeout = 0', function(timeoutErr, setTimeoutRes) {
           if(timeoutErr) {
-            console.log('error setting the postgres statement_timeout setting', timeoutErr);
+            console.error('error setting the postgres statement_timeout setting', timeoutErr);
             pgClient.query('ROLLBACK', function(rollbackErr, rollbackResult) {
-              console.log('rolling back transaction', rollbackErr);
+              console.error('rolling back transaction', rollbackErr);
               return connectFinishFn(err);
             });  
           }
@@ -157,16 +163,16 @@ module.exports = function(pg, connString) {
         
             cursor.read(numRows, function(cursorReadErr, rows) {
               if (cursorReadErr) {
-                console.log('cursor read error', cursorReadErr);
+                console.error('cursor read error', cursorReadErr);
                 pgClient.query('ROLLBACK', function(rollbackErr, rollbackResult) {
-                  console.log('rollback after cursor read error done');
+                  console.error('rollback after cursor read error done');
                   connectFinishFn(rollbackErr);
                   return readWrapperCB(rollbackErr);
                 });
               } else if (!rows.length) {
                 pgClient.query('COMMIT', function(commitErr) {
                   if (commitErr) {
-                    console.log('error committing cursor transaction', commitErr);
+                    console.error('error committing cursor transaction', commitErr);
                   }  
                   connectFinishFn();
                 });
