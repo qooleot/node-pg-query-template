@@ -24,7 +24,8 @@ module.exports = function(pg, connString) {
       if (client) {
         lastQuery = client.lastQuery;
       }
-      console.error('pg-pool error after last query: ', lastQuery, error );
+      console.error('pg-pool error after last query: ', lastQuery);
+      console.error('pg-pool error: ', error);
     } catch(e) {
       console.error('Could not log a postgres error due to circular json');
     }
