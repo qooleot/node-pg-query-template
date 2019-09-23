@@ -20,6 +20,7 @@ module.exports = function (pg, configInput) {
   const connIdentifier = createConnIdentifier(config);
 
   const pool = new pg.Pool(config);
+  pool.connectionCount = 0;
   pgPools[connIdentifier] = pool;
 
   /*
@@ -42,6 +43,7 @@ module.exports = function (pg, configInput) {
 
   // attaching method to pg.Client so all the APIs that use a singleton pgClient.queryAsync will use connection pooling
   pg.Client.prototype.queryAsync = Promise.promisify(function (query, bindVars, queryCB) {
+    const querySource = getQuerySource('queryAsync');
 
     let client = this;
     const connName = createConnIdentifier((client.connectionParameters));
@@ -52,11 +54,23 @@ module.exports = function (pg, configInput) {
     }
 
     if (this.inTransaction) {
-      client.lastQuery = {query, bindVars};
+      if (client.transactionIdleTimer) {
+        clearTimeout(client.transactionIdleTimer);
+        client.transactionIdleTimer = null;
+        client.setTransactionIdleTimer();
+      }
+      client.lastQuery = {query, bindVars, querySource};
       client.query(query, bindVars, queryCB);
     } else {
+      const maxConns = config.max ? config.max : 50;
+      if (pgPools[connName].connectionCount >= maxConns - 1) {
+        console.warn(`pgClient Max Connections of ${maxConns} reached`);
+      }
+
+      pgPools[connName].connectionCount++;
       pgPools[connName].connect(function (connectErr, pgClient, connectFinishFn) {
         if (connectErr) {
+          pgPools[connName].connectionCount--;
           console.error('database connection error: ', connectErr);
           connectFinishFn(connectErr);
         } else {
@@ -64,6 +78,7 @@ module.exports = function (pg, configInput) {
           pgClient.lastQuery = {query, bindVars};
           pgClient.query(query, bindVars, function (err, queryRes) {
             connectFinishFn();
+            pgPools[connName].connectionCount--;
             queryCB(err, queryRes);
           });
         }
@@ -71,19 +86,46 @@ module.exports = function (pg, configInput) {
     }
   });
 
+  pg.Client.prototype.setTransactionIdleTimer = function () {
+    let client = this;
+
+    if (client.transactionIdleTimer) {
+      clearTimeout(client.transactionIdleTimer);
+      client.transactionIdleTimer = null;
+    }
+
+    client.transactionIdleTimer = setTimeout(function () {
+      console.warn('pgClient Idle Transaction', client.lastQuery);
+    }, 30000);
+  }
+
   // grab client from pool, then create begin transaction
   pg.Client.prototype.transactionStart = Promise.promisify(function (cb) {
+    const querySource = getQuerySource('transactionStart');
     let client = this;
     const connName = createConnIdentifier((client.connectionParameters));
+
+    const maxConns = config.max ? config.max : 50;
+    if (pgPools[connName].connectionCount >= maxConns - 1) {
+      console.warn(`pgClient Max Connections of ${maxConns} reached`);
+    }
 
     pgPools[connName].connect(function (connectErr, pgClient, connectFinishFn) {
       if (!connectErr) {
         pgClient.connName = client.connName;
-        pgClient.returnClientToPool = connectFinishFn;
+        pgClient.returnClientToPool = function() {
+          pgPools[connName].connectionCount--;
+          connectFinishFn();
+        }
         pgClient.inTransaction = true;
         pgClient.query('BEGIN', function (err, beginResult) {
+          pgClient.lastQuery = {query: 'BEGIN', querySource};
           cb(connectErr, pgClient);
         });
+
+        pgClient.setTransactionIdleTimer();
+
+        pgPools[connName].connectionCount++;
       } else {
         console.error('transactionStart during pool.connect', connectErr);
       }
@@ -94,6 +136,10 @@ module.exports = function (pg, configInput) {
   pg.Client.prototype.commit = Promise.promisify(function (cb) {
     let client = this;
     client.inTransaction = false;
+    if (client.transactionIdleTimer) {
+      clearTimeout(client.transactionIdleTimer);
+      client.transactionIdleTimer = null;
+    }
     client.query('COMMIT', function (err, commitResult) {
       client.returnClientToPool();
       cb(err, commitResult);
@@ -104,6 +150,10 @@ module.exports = function (pg, configInput) {
   pg.Client.prototype.rollback = Promise.promisify(function (cb) {
     let client = this;
     client.inTransaction = false;
+    if (client.transactionIdleTimer) {
+      clearTimeout(client.transactionIdleTimer);
+      client.transactionIdleTimer = null;
+    }
     client.query('ROLLBACK', function (err, rollbackResult) {
       client.returnClientToPool();
       cb(err, rollbackResult);
@@ -153,7 +203,6 @@ module.exports = function (pg, configInput) {
     The bulk of the logic here is to create a transaction
       and remove statement timeout settings for cursors since they meant to be are read-only long running
    */
-
   const cursorQuery = function (query, bindVars, cursorCreateCB) {
 
     let client = this;
@@ -178,7 +227,19 @@ module.exports = function (pg, configInput) {
           }
 
           let cursor = pgClient.query(new Cursor(query, bindVars));
-          cursor.endConnection = connectFinishFn;
+          cursor.inTransaction = true;
+
+          cursor.endConnection = async function () {
+            if (cursor.inTransaction === true) {
+              pgClient.query('COMMIT', function (commitErr) {
+                if (commitErr) {
+                  console.error('error committing cursor transaction', commitErr);
+                }
+
+                connectFinishFn();
+              });
+            }
+          }
 
           cursor.readAsync = Promise.promisify(function (numRows, readWrapperCB) {
 
@@ -186,12 +247,14 @@ module.exports = function (pg, configInput) {
               if (cursorReadErr) {
                 console.error('cursor read error', cursorReadErr);
                 pgClient.query('ROLLBACK', function (rollbackErr, rollbackResult) {
+                  cursor.inTransaction = false;
                   console.error('rollback after cursor read error done');
                   connectFinishFn(rollbackErr);
                   return readWrapperCB(rollbackErr);
                 });
               } else if (!rows.length) {
                 pgClient.query('COMMIT', function (commitErr) {
+                  cursor.inTransaction = false;
                   if (commitErr) {
                     console.error('error committing cursor transaction', commitErr);
                   }
@@ -223,7 +286,7 @@ module.exports = function (pg, configInput) {
 
     convertHandlebarsTemplateToQuery(obj, substVals);
 
-    cursorQuery(obj.query, obj.values, cursorCB);
+    cursorQuery.call(this, obj.query, obj.values, cursorCB);
   });
 
   // convert @param pieces (arguments to sqlTemplate) to bind variable strings
@@ -248,9 +311,34 @@ module.exports = function (pg, configInput) {
     return {success: true}
   };
 
-  return { pool, config, pgClient: pg.Client, sqlTemplate };
+  return {pool, config, pgClient: pg.Client, sqlTemplate};
 };
 
 function createConnIdentifier(config) {
   return `${config.user}${config.host}${config.port ? config.port : 5432}${config.database}`;
+}
+
+function getQuerySource(queryType) {
+  let releventStack;
+  try {
+    throw new Error();
+  } catch (e) {
+    try {
+      const stackArr = e.stack.split(/\n/);
+
+      // start/end is to remove things in the stack internal to pg-query-template
+      let start = 4;
+      let end = 7;
+      if (queryType === 'queryAsync') {
+        start = 8;
+        end = 12;
+      }
+      releventStack = stackArr.slice(start, end);
+    } catch
+      (e) {
+      console.log('node-pg-query-template error in stack catcher logic');
+    }
+  }
+
+  return releventStack;
 }
