@@ -114,10 +114,12 @@ module.exports = function (pg, configInput) {
       if (!connectErr) {
         pgClient.connName = client.connName;
         pgClient.returnClientToPool = function() {
+          pgClient.returnedToPool = true;
           pgPools[connName].connectionCount--;
           connectFinishFn();
         }
         pgClient.inTransaction = true;
+        pgClient.returnedToPool = false;
         pgClient.query('BEGIN', function (err, beginResult) {
           pgClient.lastQuery = {query: 'BEGIN', querySource};
           cb(connectErr, pgClient);
@@ -141,7 +143,12 @@ module.exports = function (pg, configInput) {
       client.transactionIdleTimer = null;
     }
     client.query('COMMIT', function (err, commitResult) {
-      client.returnClientToPool();
+      if (!client.returnedToPool) {
+        client.returnClientToPool();
+      }
+      if (err) {
+        console.error('error committing transaction', err);
+      }
       cb(err, commitResult);
     });
   });
@@ -155,7 +162,12 @@ module.exports = function (pg, configInput) {
       client.transactionIdleTimer = null;
     }
     client.query('ROLLBACK', function (err, rollbackResult) {
-      client.returnClientToPool();
+      if (!client.returnedToPool) {
+        client.returnClientToPool();
+      }
+      if (err) {
+        console.error('error rolling back transaction', err);
+      }
       cb(err, rollbackResult);
     });
   });
